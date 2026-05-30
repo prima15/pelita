@@ -1,50 +1,108 @@
 import streamlit as st
 import os
+
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
+
+from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
+
 from langchain_openai import ChatOpenAI
 
-st.title("AI Pembangkit 🔧")
+# ======================
+# UI
+# ======================
+st.set_page_config(page_title="AI Pembangkit", layout="wide")
+st.title("⚡ AI Pembangkit Assistant")
 
+# ======================
+# LOAD PDF
+# ======================
 def load_pdfs():
     docs = []
+
     for file in os.listdir("data"):
         if file.endswith(".pdf"):
-            loader = PyPDFLoader(os.path.join("data", file))
-            docs.extend(loader.load())
+            path = os.path.join("data", file)
+            loader = PyPDFLoader(path)
+            pages = loader.load()
+
+            for p in pages:
+                p.metadata["source"] = file
+
+            docs.extend(pages)
+
     return docs
 
+
+# ======================
+# BUILD VECTOR DB (FAISS)
+# ======================
 @st.cache_resource
 def load_db():
     documents = load_pdfs()
-    splitter = RecursiveCharacterTextSplitter(chunk_size=300)
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50
+    )
+
     texts = splitter.split_documents(documents)
 
     embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-    return Chroma.from_documents(texts, embeddings)
+    db = FAISS.from_documents(texts, embeddings)
+    return db
 
-def load_llm():
+
+# ======================
+# LLM (OpenRouter)
+# ======================
+def get_llm():
     return ChatOpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=st.secrets["API_KEY"],
         model="mistralai/mistral-7b-instruct"
     )
 
-query = st.text_input("Tanya:")
+
+# ======================
+# CHAT UI
+# ======================
+query = st.text_input("Tanya manual pembangkit:")
 
 if query:
-    db = load_db()
-    docs = db.as_retriever().invoke(query)[:2]
 
-    context = "\n\n".join([d.page_content for d in docs])
+    with st.spinner("Mencari jawaban di manual..."):
+        db = load_db()
+        retriever = db.as_retriever(search_kwargs={"k": 3})
 
-    llm = load_llm()
+        docs = retriever.invoke(query)
 
-    response = llm.invoke(f"{context}\n\n{query}")
+        context = "\n\n".join([d.page_content for d in docs])
 
-    st.write(response.content)
+        llm = get_llm()
+
+        prompt = f"""
+Kamu adalah engineer pembangkit listrik.
+
+Gunakan konteks berikut untuk menjawab:
+
+{context}
+
+Pertanyaan:
+{query}
+
+Jawab secara teknis, jelas, dan praktis untuk operator.
+"""
+
+        response = llm.invoke(prompt)
+
+        st.subheader("📌 Jawaban")
+        st.write(response.content)
+
+        st.subheader("📚 Sumber Manual")
+        for d in docs:
+            st.write("-", d.metadata.get("source", "unknown"))
