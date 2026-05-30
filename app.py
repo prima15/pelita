@@ -64,7 +64,7 @@ def get_llm():
     return ChatOpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=st.secrets["API_KEY"],
-        model="mistralai/mistral-7b-instruct"
+        model="meta-llama/llama-3.1-8b-instruct:free"
     )
 
 
