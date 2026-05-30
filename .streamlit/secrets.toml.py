@@ -1,0 +1,1 @@
+API_KEY = "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"
